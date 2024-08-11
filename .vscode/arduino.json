@@ -1,0 +1,8 @@
+{
+    "configuration": "usb=serial,speed=96,opt=o2std,keys=en-us",
+    "board": "teensy:avr:teensy31",
+    "programmer": "avrisp",
+    "port": "COM4",
+    "output": "../build",
+    "sketch": "xbee_dog_feeder.ino"
+}
