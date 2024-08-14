@@ -29,6 +29,7 @@ public:
     uint8_t last_feed_result;
     uint8_t motor_state;
     uint8_t feed_count;
+    uint8_t last_feed_source;
     bool debug;
     void start(Stream &dogSerial, bool debug = 0x00)
     {
@@ -37,6 +38,7 @@ public:
         this->last_feed_result = FEED_OK;
         this->motor_state = FEED_MOTOR_OK;
         this->feed_count = 0x00;
+        this->last_feed_source = 0x00;
         this->dogSerial = &dogSerial;
         this->debug = debug;
     }
@@ -119,7 +121,9 @@ private:
     void feed_result_handler(uint32_t *dval)
     {
         this->last_feed_result = (*dval >> 24) & 0xFF;
-        uint8_t byte1 = (*dval >> 16) & 0xFF;
+        // this->last_feed_source = (*dval >> 16) & 0xFF;
+        Serial.print(F("Ukn Byte: "));
+        Serial.println((*dval >> 16) & 0xFF); // Seems to always be one?
         uint8_t motor_state = (*dval >> 8) & 0xFF;
         this->feed_count = (*dval >> 0) & 0xFF; // May be auto also, need to test, just know it increments by 1
         if (this->debug)
@@ -157,13 +161,40 @@ private:
                 this->motor_state = 0x01;
             }
 
-            Serial.print(F("UKN 2nd B: "));
-            Serial.println(byte1, HEX);
             Serial.print(F("Feed Ct: "));
             Serial.println(this->feed_count);
         }
     }
 
+    void feed_portion_handler(uint32_t *dval)
+    {
+        uint8_t byte0 = (*dval >> 24) & 0xFF;
+        uint8_t byte1 = (*dval >> 16) & 0xFF;
+        uint8_t byte2 = (*dval >> 8) & 0xFF;
+        //this->last_feed_source = (*dval >> 0) & 0xFF;
+        uint8_t byte3 = (*dval >> 0) & 0xFF;
+        /*
+        if (this->last_feed_source == 0x01)
+        {
+            Serial.print(F(" (LCL FEED), "));
+        }
+        if (this->last_feed_source == 0x02)
+        {
+            Serial.print(F(" (RMT FEED), "));
+        }
+        */
+        if (this->debug)
+        {
+            Serial.print(F("UKN B0: "));
+            Serial.print(byte0, HEX);
+            Serial.print(F(", UKN B1: "));
+            Serial.print(byte1, HEX);
+            Serial.print(F(", UKN B2: "));
+            Serial.print(byte2, HEX);
+            Serial.print(F(", UKN B3: "));
+            Serial.println(byte3, HEX);
+        }
+    }
     void state_handler(uint8_t *dpid, uint8_t *dtype, uint32_t *dval)
     {
         if (*dpid == FEED_STATE_ID)
@@ -176,7 +207,7 @@ private:
         }
         else if (*dpid == FEED_PORTION_ID)
         {
-            Serial.println(F("FEED PORT NOT IMP"));
+            feed_portion_handler(dval);
         }
         else
         {

@@ -15,6 +15,7 @@
 #define BASIC_ENDPOINT 0
 #define FEEDER_ENDPOINT 1
 #define DIAG_ENDPOINT 2
+#define FEED_TRIG_ENDPOINT 3
 
 #define FEED_EEPROM_LOC 8
 
@@ -40,7 +41,6 @@ void setup()
   digitalWrite(XBEE_RST, LOW);
   delay(5);
   digitalWrite(XBEE_RST, HIGH);
-  //pinMode(XBEE_RST, INPUT);
 
   Serial.begin(115200);
   Serial2.begin(9600);
@@ -132,7 +132,17 @@ void update_feed_setting()
   analog_out_attr->SetValue(saved_value);
   zha.sendAttributeRpt(analog_out_cluster.id, analog_out_attr, end_point.id, 1);
 }
-
+void update_last_feed_trigger(bool force = 0x00)
+{
+  Endpoint end_point = zha.GetEndpoint(FEED_TRIG_ENDPOINT);
+  Cluster clstr = end_point.GetCluster(MULTISTATE_IN_CLUSTER_ID);
+  attribute *pv_attr = clstr.GetAttr(BINARY_PV_ATTR);
+  if (pv_attr->GetIntValue(0x00) != feed_state.last_feed_source || force)
+  {
+    pv_attr->SetValue(feed_state.last_feed_source);
+    zha.sendAttributeRpt(clstr.id, pv_attr, end_point.id, 1);
+  }
+}
 bool update_sensors(void *)
 {
   // update_jam_sensor(0x01);
@@ -165,6 +175,7 @@ void send_inital_state()
   update_feed_result();
   update_motor_state();
   update_feed_setting();
+  update_last_feed_trigger();
 }
 
 void loop()
@@ -184,6 +195,7 @@ void loop()
       update_feed_count();
       update_feed_result();
       update_motor_state();
+      update_last_feed_trigger();
     }
 
     if (!init_status_sent)
@@ -245,7 +257,7 @@ void zhaWriteAttr(ZBExplicitRxResponse &erx)
 
     Serial.print(F("Flt now: "));
     Serial.println(pv_attr->GetFloatValue(), 2);
-    zha.sendAttributeWriteRsp(ai_clstr.id, pv_attr, end_point.id, 1, 0x01, erx.getFrameData()[erx.getDataOffset() + 1]);
+    zha.sendAttributeWriteResp(ai_clstr.id, pv_attr, end_point.id, 1, 0x01, erx.getFrameData()[erx.getDataOffset() + 1]);
 
     uint8_t mem_loc;
     if (end_point.id == FEEDER_ENDPOINT)
@@ -278,7 +290,7 @@ void SetAttr(uint8_t ep_id, uint16_t cluster_id, uint16_t attr_id, uint8_t value
       Serial.print(F("Toggle: "));
       Serial.println(end_point.id);
       // We never mess with the attribute, since we this is just a toggle
-      zha.sendAttributeWriteRsp(cluster_id, attr, ep_id, 1, value, zha.cmd_seq_id); // Tell sender that we did what we were told to
+      zha.sendAttributeCmdRsp(cluster_id, attr, ep_id, 1, value, zha.cmd_seq_id); // Tell sender that we did what we were told to
       Cluster feed_qty_cluster = end_point.GetCluster(ANALOG_OUT_CLUSTER_ID);
       attribute *feed_qty_attr = feed_qty_cluster.GetAttr(BINARY_PV_ATTR);
       uint8_t feed_qty = (uint8_t)feed_qty_attr->GetFloatValue();
