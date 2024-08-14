@@ -310,10 +310,6 @@ void zhaClstrCmd(ZBExplicitRxResponse &erx)
     if (erx.getClusterId() == ON_OFF_CLUSTER_ID)
     {
       Serial.println(F("ON/OFF"));
-      // Endpoint end_point = zha.GetEndpoint(erx.getDstEndpoint());
-      // Cluster Command, so it's a write command
-      // uint8_t len_data = erx.getDataLength() - 3;
-      // uint16_t attr_rqst[len_data / 2];
       uint8_t new_state = erx.getFrameData()[erx.getDataOffset() + 2];
 
       if (new_state == 0x00)
