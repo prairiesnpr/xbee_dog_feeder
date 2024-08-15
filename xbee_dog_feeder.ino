@@ -61,7 +61,9 @@ void update_feed_count(bool force = 0x00)
 {
   Endpoint end_point = zha.GetEndpoint(FEEDER_ENDPOINT);
   Cluster clstr = end_point.GetCluster(ANALOG_IN_CLUSTER_ID);
-  attribute *pv_attr = clstr.GetAttr(BINARY_PV_ATTR);
+
+  attribute *pv_attr;
+  uint8_t attr_exists = clstr.GetAttr(&pv_attr, BINARY_PV_ATTR);
   if (pv_attr->GetFloatValue() != feed_state.feed_count || force)
   {
     Serial.print(F("cnt was: "));
@@ -77,7 +79,8 @@ void update_feed_result(bool force = 0x00)
 {
   Endpoint end_point = zha.GetEndpoint(DIAG_ENDPOINT);
   Cluster clstr = end_point.GetCluster(MULTISTATE_IN_CLUSTER_ID);
-  attribute *pv_attr = clstr.GetAttr(BINARY_PV_ATTR);
+  attribute *pv_attr;
+  uint8_t attr_exists = clstr.GetAttr(&pv_attr, BINARY_PV_ATTR);
   if (pv_attr->GetIntValue(0x00) != feed_state.last_feed_result || force)
   {
     pv_attr->SetValue(feed_state.last_feed_result);
@@ -89,7 +92,8 @@ void update_motor_state(bool force = 0x00)
 {
   Endpoint end_point = zha.GetEndpoint(DIAG_ENDPOINT);
   Cluster clstr = end_point.GetCluster(BINARY_INPUT_CLUSTER_ID);
-  attribute *pv_attr = clstr.GetAttr(BINARY_PV_ATTR);
+  attribute *pv_attr;
+  uint8_t attr_exists = clstr.GetAttr(&pv_attr, BINARY_PV_ATTR);
   if (pv_attr->GetIntValue(0x00) != feed_state.motor_state || force)
   {
     pv_attr->SetValue(feed_state.motor_state);
@@ -101,7 +105,8 @@ void update_feed_level(bool force = 0x00)
 {
   Endpoint end_point = zha.GetEndpoint(FEEDER_ENDPOINT);
   Cluster clstr = end_point.GetCluster(MULTISTATE_IN_CLUSTER_ID);
-  attribute *pv_attr = clstr.GetAttr(BINARY_PV_ATTR);
+  attribute *pv_attr;
+  uint8_t attr_exists = clstr.GetAttr(&pv_attr, BINARY_PV_ATTR);
   if (pv_attr->GetIntValue(0x00) != feed_state.food_level || force)
   {
     pv_attr->SetValue(feed_state.food_level);
@@ -113,7 +118,8 @@ void update_jam_sensor(bool force = 0x00)
 {
   Endpoint end_point = zha.GetEndpoint(FEEDER_ENDPOINT);
   Cluster clstr = end_point.GetCluster(BINARY_INPUT_CLUSTER_ID);
-  attribute *pv_attr = clstr.GetAttr(BINARY_PV_ATTR);
+  attribute *pv_attr;
+  uint8_t attr_exists = clstr.GetAttr(&pv_attr, BINARY_PV_ATTR);
   if (pv_attr->GetIntValue(0x00) != feed_state.is_jammed || force)
   {
     pv_attr->SetValue(feed_state.is_jammed);
@@ -125,7 +131,8 @@ void update_feed_setting()
 {
   Endpoint end_point = zha.GetEndpoint(FEEDER_ENDPOINT);
   Cluster analog_out_cluster = end_point.GetCluster(ANALOG_OUT_CLUSTER_ID);
-  attribute *analog_out_attr = analog_out_cluster.GetAttr(BINARY_PV_ATTR);
+  attribute *analog_out_attr;
+  uint8_t attr_exists = analog_out_cluster.GetAttr(&analog_out_attr, BINARY_PV_ATTR);
 
   // Need to load the settings from EEPROM and save to the Analog Attr
   uint32_t saved_value = ReadInt(FEED_EEPROM_LOC);
@@ -136,7 +143,8 @@ void update_last_feed_trigger(bool force = 0x00)
 {
   Endpoint end_point = zha.GetEndpoint(FEED_TRIG_ENDPOINT);
   Cluster clstr = end_point.GetCluster(MULTISTATE_IN_CLUSTER_ID);
-  attribute *pv_attr = clstr.GetAttr(BINARY_PV_ATTR);
+  attribute *pv_attr;
+  uint8_t attr_exists = clstr.GetAttr(&pv_attr, BINARY_PV_ATTR);
   if (pv_attr->GetIntValue(0x00) != feed_state.last_feed_source || force)
   {
     pv_attr->SetValue(feed_state.last_feed_source);
@@ -252,7 +260,8 @@ void zhaWriteAttr(ZBExplicitRxResponse &erx)
     Serial.println(a_val, 4);
 
     Cluster ai_clstr = end_point.GetCluster(erx.getClusterId());
-    attribute *pv_attr = ai_clstr.GetAttr(BINARY_PV_ATTR);
+    attribute *ai_attr;
+    uint8_t attr_exists = ai_clstr.GetAttr(&ai_attr, BINARY_PV_ATTR);
     pv_attr->SetFloatValue(a_val);
 
     Serial.print(F("Flt now: "));
@@ -277,7 +286,8 @@ void SetAttr(uint8_t ep_id, uint16_t cluster_id, uint16_t attr_id, uint8_t value
 {
   Endpoint end_point = zha.GetEndpoint(ep_id);
   Cluster cluster = end_point.GetCluster(cluster_id);
-  attribute *attr = cluster.GetAttr(attr_id);
+  attribute *attr;
+  uint8_t attr_exists = cluster.GetAttr(&attr, attr_id);
 
   Serial.print("Clstr: ");
   Serial.println(cluster_id, HEX);
@@ -292,7 +302,8 @@ void SetAttr(uint8_t ep_id, uint16_t cluster_id, uint16_t attr_id, uint8_t value
       // We never mess with the attribute, since we this is just a toggle
       zha.sendAttributeCmdRsp(cluster_id, attr, ep_id, 1, value, zha.cmd_seq_id); // Tell sender that we did what we were told to
       Cluster feed_qty_cluster = end_point.GetCluster(ANALOG_OUT_CLUSTER_ID);
-      attribute *feed_qty_attr = feed_qty_cluster.GetAttr(BINARY_PV_ATTR);
+      attribute *feed_qty_attr;
+      uint8_t attr_exists = feed_qty_cluster.GetAttr(&feed_qty_attr, BINARY_PV_ATTR);
       uint8_t feed_qty = (uint8_t)feed_qty_attr->GetFloatValue();
       feed_state.genFeed(feed_qty);
       delay(100);
