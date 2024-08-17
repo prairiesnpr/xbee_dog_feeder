@@ -16,6 +16,7 @@
 #define FEEDER_ENDPOINT 1
 #define DIAG_ENDPOINT 2
 #define FEED_TRIG_ENDPOINT 3
+#define IS_FEEDING_ENDPOINT 4
 
 #define FEED_EEPROM_LOC 8
 
@@ -126,7 +127,18 @@ void update_jam_sensor(bool force = 0x00)
     zha.sendAttributeRpt(clstr.id, pv_attr, end_point.id, 1);
   }
 }
-
+void update_is_feeding_sensor(bool force = 0x00)
+{
+  Endpoint end_point = zha.GetEndpoint(IS_FEEDING_ENDPOINT);
+  Cluster clstr = end_point.GetCluster(BINARY_INPUT_CLUSTER_ID);
+  attribute *pv_attr;
+  uint8_t attr_exists = clstr.GetAttr(&pv_attr, BINARY_PV_ATTR);
+  if (pv_attr->GetIntValue(0x00) != feed_state.feeding || force)
+  {
+    pv_attr->SetValue(feed_state.feeding);
+    zha.sendAttributeRpt(clstr.id, pv_attr, end_point.id, 1);
+  }
+}
 void update_feed_setting()
 {
   Endpoint end_point = zha.GetEndpoint(FEEDER_ENDPOINT);
@@ -184,6 +196,7 @@ void send_inital_state()
   update_motor_state();
   update_feed_setting();
   update_last_feed_trigger();
+  update_is_feeding_sensor();
 }
 
 void loop()
@@ -204,6 +217,7 @@ void loop()
       update_feed_result();
       update_motor_state();
       update_last_feed_trigger();
+      update_is_feeding_sensor();
     }
 
     if (!init_status_sent)
@@ -221,7 +235,7 @@ void loop()
     Serial.println(START_LOOPS);
 
     last_msg_time = millis();
-    if (start_fails > 15)
+    if (start_fails == 15)
     {
       // Sometimes we don't get a response from dev ann, try a transmit and see if we are good
       send_inital_state();
@@ -260,16 +274,15 @@ void zhaWriteAttr(ZBExplicitRxResponse &erx)
     Serial.println(a_val, 4);
 
     Cluster ai_clstr = end_point.GetCluster(erx.getClusterId());
-    attribute *ai_attr;
-    uint8_t attr_exists = ai_clstr.GetAttr(&ai_attr, BINARY_PV_ATTR);
+    attribute *pv_attr;
+    uint8_t attr_exists = ai_clstr.GetAttr(&pv_attr, BINARY_PV_ATTR);
     pv_attr->SetFloatValue(a_val);
-
     Serial.print(F("Flt now: "));
     Serial.println(pv_attr->GetFloatValue(), 2);
     zha.sendAttributeWriteResp(ai_clstr.id, pv_attr, end_point.id, 1, 0x01, erx.getFrameData()[erx.getDataOffset() + 1]);
 
     uint8_t mem_loc;
-    if (end_point.id == FEEDER_ENDPOINT)
+    if ((end_point.id == FEEDER_ENDPOINT) && attr_exists)
     {
       Serial.println(F("FEED"));
       mem_loc = FEED_EEPROM_LOC;
@@ -292,7 +305,7 @@ void SetAttr(uint8_t ep_id, uint16_t cluster_id, uint16_t attr_id, uint8_t value
   Serial.print("Clstr: ");
   Serial.println(cluster_id, HEX);
 
-  if (cluster_id == ON_OFF_CLUSTER_ID)
+  if ((cluster_id == ON_OFF_CLUSTER_ID) && attr_exists)
   {
     // We don't want to set value here, value is set by the door opening or closing
     if (value == 0x00 || 0x01)
@@ -302,6 +315,7 @@ void SetAttr(uint8_t ep_id, uint16_t cluster_id, uint16_t attr_id, uint8_t value
       // We never mess with the attribute, since we this is just a toggle
       zha.sendAttributeCmdRsp(cluster_id, attr, ep_id, 1, value, zha.cmd_seq_id); // Tell sender that we did what we were told to
       Cluster feed_qty_cluster = end_point.GetCluster(ANALOG_OUT_CLUSTER_ID);
+
       attribute *feed_qty_attr;
       uint8_t attr_exists = feed_qty_cluster.GetAttr(&feed_qty_attr, BINARY_PV_ATTR);
       uint8_t feed_qty = (uint8_t)feed_qty_attr->GetFloatValue();

@@ -1,6 +1,9 @@
 #define TUYA_HB 0x00
 #define TUYA_STATE 0x07
+#define TUYA_SEND_CMD 0x06
 #define TUYA_DATE 0x1c
+#define TUYA_RQST_DP_CMD 0x08
+#define TUYA_VERSION 0x00
 
 #define FEEDER_FULL 0x00
 #define FEEDER_LOW 0x01
@@ -18,22 +21,30 @@
 #define FEED_PORTION_ID 0x65
 #define UKN_STATE 0x68 // Need to figure out what this is
 
-constexpr uint8_t bufferlen = 18;
+constexpr uint8_t bufferlen = 20;
 constexpr uint8_t pkt_start_id[] = {0x55, 0xaa};
 
 class FeederState
 {
 public:
     uint8_t food_level;
+    bool feeding;
     bool is_jammed;
     uint8_t last_feed_result;
     uint8_t motor_state;
     uint8_t feed_count;
     uint8_t last_feed_source;
+    uint8_t hb_ok = 0x00;
+    uint8_t init_complete = 0x00;
+    uint8_t *loop_time;
     bool debug;
+    unsigned long last_hb_time = millis();
+    unsigned long last_log_time = millis();
+
     void start(Stream &dogSerial, bool debug = 0x00)
     {
         this->food_level = FEEDER_EMPTY;
+        this->feeding = 0x00;
         this->is_jammed = 0x00;
         this->last_feed_result = FEED_OK;
         this->motor_state = FEED_MOTOR_OK;
@@ -41,17 +52,56 @@ public:
         this->last_feed_source = 0x00;
         this->dogSerial = &dogSerial;
         this->debug = debug;
+        this->genHeartbeat();
     }
     void loop()
     {
+        if (millis() - this->last_hb_time > 15000)
+        {
+            if (millis() - this->last_log_time > 1000)
+            {
+                Serial.println(F("HB Lost"));
+                this->last_log_time = millis();
+            }
+            this->hb_ok = 0x00;
+        }
+        else
+        {
+            this->hb_ok = 0x01;
+        }
+
+        if (this->init_complete && (millis() - this->last_hb_time > 15000))
+        {
+            this->genHeartbeat();
+        }
+        else if (!this->init_complete && (millis() - this->last_hb_time > 1000))
+        {
+            this->genHeartbeat();
+        }
+
         this->listenForData();
         this->recvDogPacket();
     }
     void genFeed(uint8_t feed_port)
     {
-        uint8_t cmd[] = {0x55, 0xAA, 0x00, 0x06, 0x00, 0x08, 0x65, 0x02, 0x00, 0x04, 0x00, 0x00, 0x00, feed_port, 0x00};
-        cmd[14] = calculate_chk_sum(cmd, 14);
-        this->dogSerial->write(cmd, 15);
+        // https://developer.tuya.com/en/docs/iot/tuya-cloud-universal-serial-port-access-protocol?
+        uint8_t cmd[] = {0x55, 0xAA, TUYA_VERSION, TUYA_SEND_CMD, 0x00, 0x08, 0x65, 0x02, 0x00, 0x04, 0x00, 0x00, 0x00, feed_port, 0x00};
+        cmd[sizeof(cmd) - 1] = calculate_chk_sum(cmd, sizeof(cmd) - 1);
+        this->dogSerial->write(cmd, sizeof(cmd));
+    }
+    void genHeartbeat()
+    {
+        // Send every sec until response, then every 15sec
+        uint8_t cmd[] = {0x55, 0xAA, TUYA_VERSION, TUYA_HB, 0x00, 0x00, 0x00};
+        cmd[sizeof(cmd) - 1] = calculate_chk_sum(cmd, sizeof(cmd) - 1);
+        this->dogSerial->write(cmd, sizeof(cmd));
+    }
+    void reportAllDP()
+    {
+        // Report all data points
+        uint8_t cmd[] = {0x55, 0xAA, TUYA_VERSION, TUYA_RQST_DP_CMD, 0x00, 0x00, 0x00};
+        cmd[sizeof(cmd) - 1] = calculate_chk_sum(cmd, sizeof(cmd) - 1);
+        this->dogSerial->write(cmd, sizeof(cmd));
     }
 
 private:
@@ -98,9 +148,13 @@ private:
 
     void feed_state_handler(uint32_t *dval)
     {
+        this->feeding = (*dval >> 16) & 0xFF;
         this->food_level = (*dval >> 24) & 0xFF;
         if (this->debug)
         {
+            Serial.print(F("FEEDING: "));
+            Serial.print(this->feeding, HEX);
+            Serial.print(F(", "));
             Serial.print(this->food_level, HEX);
             Serial.print(F(": FEEDER "));
             if (this->food_level == FEEDER_EMPTY)
@@ -116,6 +170,7 @@ private:
                 Serial.println(F("LOW"));
             }
         }
+
     }
 
     void feed_result_handler(uint32_t *dval)
@@ -171,7 +226,7 @@ private:
         uint8_t byte0 = (*dval >> 24) & 0xFF;
         uint8_t byte1 = (*dval >> 16) & 0xFF;
         uint8_t byte2 = (*dval >> 8) & 0xFF;
-        //this->last_feed_source = (*dval >> 0) & 0xFF;
+        // this->last_feed_source = (*dval >> 0) & 0xFF;
         uint8_t byte3 = (*dval >> 0) & 0xFF;
         /*
         if (this->last_feed_source == 0x01)
@@ -220,13 +275,18 @@ private:
     {
         if (new_data)
         {
-            for (uint8_t i = 0; i < pktstop; i++)
+            if (buffer[3] != TUYA_HB)
             {
-                Serial.print(buffer[i], HEX);
-            }
-            if (pktpos)
-            {
-                Serial.println();
+                for (uint8_t i = 0; i < pktstop; i++)
+                {
+                    Serial.print(F("0x"));
+                    Serial.print(buffer[i], HEX);
+                    Serial.print(F(" "));
+                }
+                if (pktpos)
+                {
+                    Serial.println();
+                }
             }
 
             if (buffer[3] == TUYA_STATE)
@@ -236,6 +296,23 @@ private:
                 uint32_t dval;
                 parse_state_pkt(buffer, &dpid, &dtype, &dval);
                 state_handler(&dpid, &dtype, &dval);
+            }
+            else if (buffer[3] == TUYA_HB)
+            {
+                if (!this->hb_ok)
+                {
+                    Serial.println(F("HB"));
+                }
+
+                this->hb_ok = 0x01;
+                if (buffer[6] == 0x00)
+                {
+                    Serial.println(F("Module Start"));
+                    this->init_complete = 0x01;
+                }
+                this->last_hb_time = millis();
+
+                // byte 6 0 = first boot, 1 = running
             }
             pktpos = 0;
             pktstop = 0;
@@ -271,34 +348,13 @@ private:
                     return;
                 }
             }
-            else if (pktpos == 3)
-            {
-                /*
-                Serial.print(F("Pkt Type: "));
-                if (buffer[pktpos] == TUYA_DATE)
-                {
-                    Serial.println(F("DT"));
-                }
-                else if (buffer[pktpos] == TUYA_STATE)
-                {
-                    Serial.println(F("ST"));
-                }
-                else if (buffer[pktpos] == TUYA_HB)
-                {
-                    Serial.println(F("HB"));
-                }
-                else
-                {
-                    Serial.println(buffer[pktpos]);
-                }
-                */
-            }
+
             else if (pktpos == 5)
             {
                 memcpy(&pktlen, buffer + pktpos - 1, 2);
                 pktlen = SWAP_UINT16(pktlen);
             }
-            else if (pktlen && pktpos == pktlen + 6)
+            else if (pktpos > 5 && pktpos == pktlen + 6)
             {
                 pktstop = pktlen + 6;
                 if (calculate_chk_sum(buffer, pktstop) == buffer[pktpos])
@@ -310,14 +366,17 @@ private:
                     Serial.print(F("BD CHKSUM: "));
                     for (uint8_t k = 0; k < (pktlen + 7); k++)
                     {
+                        Serial.print(F("0x"));
                         Serial.print(buffer[k], HEX);
-                        Serial.print(" ");
+                        Serial.print(F(" "));
                     }
                     Serial.println();
                     Serial.print(F("Buf Pos: "));
                     Serial.print(pktpos);
-                    Serial.print(F("Exp: "));
-                    Serial.println(buffer[pktpos], HEX);
+                    Serial.print(F(", Exp: "));
+                    Serial.print(buffer[pktpos], HEX);
+                    Serial.print(F(", Got: "));
+                    Serial.println(calculate_chk_sum(buffer, pktstop));
                     pktpos = 0;
                     pktstart = 0;
                     pktstop = 0;
@@ -332,6 +391,12 @@ private:
             if (pktpos >= bufferlen)
             {
                 Serial.println(F("Buf Overflow"));
+                for(uint8_t j = 0; j<bufferlen; j++){
+                    Serial.print(F("0x"));
+                    Serial.print(buffer[j], HEX);
+                    Serial.print(F(" "));
+                }
+                Serial.println();
                 pktpos = 0;
                 pktstart = 0;
                 pktstop = 0;
